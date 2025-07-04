@@ -16,8 +16,17 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 NOTION_API_KEY = os.getenv('NOTION_API_KEY')
-NOTION_DATABASE_ID = os.getenv('NOTION_DATABASE_ID')
 AUTHORIZED_CHAT_ID = os.getenv('AUTHORIZED_CHAT_ID')  # Your Telegram chat ID
+
+# Page IDs for smart routing
+NOTION_PAGES = {
+    'tasks': os.getenv('NOTION_TODO_PAGE'),
+    'shopping': os.getenv('NOTION_SHOPPING_PAGE'),
+    'projects': os.getenv('NOTION_PROJECTS_PAGE'),
+    'ideas': os.getenv('NOTION_BRAIN_DUMP_PAGE'),
+    'personal': os.getenv('NOTION_PERSONAL_PAGE'),
+    'general': os.getenv('NOTION_BRAIN_DUMP_PAGE')  # Fallback
+}
 
 class BrainDumpProcessor:
     def __init__(self):
@@ -28,25 +37,27 @@ class BrainDumpProcessor:
         """Send message to Claude for processing and categorization"""
         
         prompt = f"""
-        You are helping organize a brain dump message. Please analyze this message and extract:
-        1. Main tasks or action items
-        2. Ideas or thoughts to remember
-        3. Categories/tags that would be useful
-        4. Priority level (High/Medium/Low)
-        5. Any deadlines or time-sensitive items
-        6. What type of content this is (task, idea, project, personal, work, shopping, etc.)
-        
+        You are helping organize a brain dump message. Analyze this message and determine which category it belongs in:
+
+        Available categories:
+        - tasks: Action items, todos, things to do, reminders
+        - shopping: Things to buy, purchases, supplies, grocery items
+        - projects: Work projects, ongoing initiatives, big goals
+        - ideas: Creative thoughts, concepts, inspiration, random ideas
+        - personal: Family, relationships, personal life, self-improvement
+        - general: Everything else that doesn't fit above
+
         Message: "{message}"
         
         Please respond in this JSON format:
         {{
-            "tasks": ["list of specific tasks"],
-            "ideas": ["list of ideas or thoughts"],
-            "categories": ["list of relevant categories/tags"],
+            "category": "tasks/shopping/projects/ideas/personal/general",
+            "title": "Short descriptive title for the entry",
+            "tasks": ["specific action items if any"],
+            "ideas": ["thoughts or concepts if any"],
             "priority": "High/Medium/Low",
             "deadline": "any deadline mentioned or null",
-            "content_type": "task/idea/project/personal/work/shopping/general",
-            "cleaned_summary": "a clean, organized summary of the content"
+            "cleaned_summary": "a clean, organized summary"
         }}
         """
         
@@ -365,8 +376,8 @@ def telegram_webhook():
         
         if success:
             # Send confirmation back to Telegram
-            content_type = processed_data.get('content_type', 'general')
-            send_telegram_message(chat_id, f"✅ Brain dump processed and added to Notion! (Type: {content_type})")
+            category = processed_data.get('category', 'general')
+            send_telegram_message(chat_id, f"✅ Added to {category.title()} page!")
             return jsonify({"status": "success"}), 200
         else:
             send_telegram_message(chat_id, "❌ Failed to add to Notion. Check logs.")
