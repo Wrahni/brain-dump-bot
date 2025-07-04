@@ -225,12 +225,15 @@ class BrainDumpProcessor:
         try:
             response = requests.post(self.notion_url, headers=headers, json=data)
             logger.info(f"Notion response status: {response.status_code}")
+            logger.info(f"Notion response body: {response.text}")
+            logger.info(f"Request data sent: {json.dumps(data, indent=2)}")
             response.raise_for_status()
             logger.info(f"Successfully added to Notion page: {category}")
             return True
             
         except Exception as e:
             logger.error(f"Error adding to Notion: {e}")
+            logger.error(f"Full request data: {json.dumps(data, indent=2)}")
             return False
 
 # Initialize processor
