@@ -16,7 +16,7 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 NOTION_API_KEY = os.getenv('NOTION_API_KEY')
-AUTHORIZED_CHAT_ID = os.getenv('AUTHORIZED_CHAT_ID')  # Your Telegram chat ID
+AUTHORIZED_CHAT_ID = os.getenv('AUTHORIZED_CHAT_ID')
 
 # Page IDs for smart routing
 NOTION_PAGES = {
@@ -114,7 +114,18 @@ class BrainDumpProcessor:
             }
     
     def add_to_notion(self, processed_data: Dict[str, Any], original_message: str) -> bool:
-        """Add processed data to Notion database"""
+        """Add processed data to appropriate Notion page"""
+        
+        # Determine which page to use
+        category = processed_data.get('category', 'general')
+        page_id = NOTION_PAGES.get(category)
+        
+        if not page_id:
+            # Fallback to general page
+            page_id = NOTION_PAGES.get('general')
+            if not page_id:
+                logger.error("No pages configured!")
+                return False
         
         headers = {
             "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -122,106 +133,20 @@ class BrainDumpProcessor:
             "Notion-Version": "2022-06-28"
         }
         
-        # Create properties for the Notion page
-        properties = {
-            "Title": {
-                "title": [
-                    {
-                        "text": {
-                            "content": processed_data.get('cleaned_summary', original_message)[:100]
-                        }
-                    }
-                ]
-            },
-            "Original Message": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": original_message
-                        }
-                    }
-                ]
-            },
-            "Tasks": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": "\n".join(processed_data.get('tasks', []))
-                        }
-                    }
-                ]
-            },
-            "Ideas": {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": "\n".join(processed_data.get('ideas', []))
-                        }
-                    }
-                ]
-            },
-            "Categories": {
-                "multi_select": [
-                    {"name": cat} for cat in processed_data.get('categories', [])
-                ]
-            },
-            "Content Type": {
-                "select": {
-                    "name": processed_data.get('content_type', 'general').title()
-                }
-            },
-            "Priority": {
-                "select": {
-                    "name": processed_data.get('priority', 'Medium')
-                }
-            },
-            "Created": {
-                "date": {
-                    "start": datetime.now().isoformat()
-                }
-            }
-        }
-        
-        # Add deadline if present
-        if processed_data.get('deadline'):
-            properties["Deadline"] = {
-                "rich_text": [
-                    {
-                        "text": {
-                            "content": processed_data['deadline']
-                        }
-                    }
-                ]
-            }
-        
         data = {
             "parent": {
-                "page_id": NOTION_DATABASE_ID  # Using as page ID now, not database ID
+                "page_id": page_id
             },
             "properties": {
                 "title": [
                     {
                         "text": {
-                            "content": processed_data.get('cleaned_summary', original_message)[:100]
+                            "content": processed_data.get('title', original_message[:100])
                         }
                     }
                 ]
             },
             "children": [
-                {
-                    "object": "block",
-                    "type": "heading_2",
-                    "heading_2": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {
-                                    "content": "Original Message"
-                                }
-                            }
-                        ]
-                    }
-                },
                 {
                     "object": "block",
                     "type": "paragraph",
@@ -230,7 +155,7 @@ class BrainDumpProcessor:
                             {
                                 "type": "text",
                                 "text": {
-                                    "content": original_message
+                                    "content": processed_data.get('cleaned_summary', original_message)
                                 }
                             }
                         ]
@@ -250,62 +175,35 @@ class BrainDumpProcessor:
                             {
                                 "type": "text",
                                 "text": {
-                                    "content": "Tasks"
-                                }
-                            }
-                        ]
-                    }
-                },
-                {
-                    "object": "block",
-                    "type": "bulleted_list_item",
-                    "bulleted_list_item": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {
-                                    "content": "\n".join(processed_data['tasks'])
+                                    "content": "Tasks:"
                                 }
                             }
                         ]
                     }
                 }
             ])
-        
-        # Add ideas if present
-        if processed_data.get('ideas'):
-            data["children"].extend([
-                {
+            for task in processed_data['tasks']:
+                data["children"].append({
                     "object": "block",
-                    "type": "heading_3",
-                    "heading_3": {
+                    "type": "to_do",
+                    "to_do": {
                         "rich_text": [
                             {
                                 "type": "text",
                                 "text": {
-                                    "content": "Ideas"
+                                    "content": task
                                 }
                             }
-                        ]
+                        ],
+                        "checked": False
                     }
-                },
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [
-                            {
-                                "type": "text",
-                                "text": {
-                                    "content": "\n".join(processed_data['ideas'])
-                                }
-                            }
-                        ]
-                    }
-                }
-            ])
+                })
         
-        # Add metadata
+        # Add priority and metadata
+        metadata = f"Priority: {processed_data.get('priority', 'Medium')} | Added: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        if processed_data.get('deadline'):
+            metadata += f" | Deadline: {processed_data['deadline']}"
+            
         data["children"].append({
             "object": "block",
             "type": "paragraph",
@@ -314,7 +212,10 @@ class BrainDumpProcessor:
                     {
                         "type": "text",
                         "text": {
-                            "content": f"Priority: {processed_data.get('priority', 'Medium')} | Type: {processed_data.get('content_type', 'general')} | Created: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                            "content": metadata,
+                            "annotations": {
+                                "italic": True
+                            }
                         }
                     }
                 ]
@@ -324,19 +225,26 @@ class BrainDumpProcessor:
         try:
             response = requests.post(self.notion_url, headers=headers, json=data)
             logger.info(f"Notion response status: {response.status_code}")
-            logger.info(f"Notion response headers: {response.headers}")
-            logger.info(f"Notion response body: {response.text}")
             response.raise_for_status()
-            logger.info("Successfully added to Notion")
+            logger.info(f"Successfully added to Notion page: {category}")
             return True
             
         except Exception as e:
             logger.error(f"Error adding to Notion: {e}")
-            logger.error(f"Request data was: {json.dumps(data, indent=2)}")
             return False
 
 # Initialize processor
 processor = BrainDumpProcessor()
+
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return jsonify({"message": "Brain Dump Bot is running!", "status": "ok"}), 200
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()}), 200
 
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
@@ -399,16 +307,6 @@ def send_telegram_message(chat_id: str, text: str):
         requests.post(url, json=data)
     except Exception as e:
         logger.error(f"Error sending Telegram message: {e}")
-
-@app.route('/', methods=['GET'])
-def root():
-    """Root endpoint"""
-    return jsonify({"message": "Brain Dump Bot is running!", "status": "ok"}), 200
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()}), 200
 
 @app.route('/test', methods=['POST'])
 def test_endpoint():
