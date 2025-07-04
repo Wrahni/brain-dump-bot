@@ -92,24 +92,24 @@ class BrainDumpProcessor:
             except:
                 # Fallback if JSON parsing fails
                 return {
+                    "category": "general",
+                    "title": message[:50],
                     "tasks": [message] if any(word in message.lower() for word in ['need', 'buy', 'do', 'call', 'remember']) else [],
                     "ideas": [],
-                    "categories": ["General"],
                     "priority": "Medium",
                     "deadline": None,
-                    "content_type": "general",
                     "cleaned_summary": message
                 }
                 
         except Exception as e:
             logger.error(f"Error processing with Claude: {e}")
             return {
+                "category": "general",
+                "title": message[:50],
                 "tasks": [message],
                 "ideas": [],
-                "categories": ["General"],
                 "priority": "Medium",
                 "deadline": None,
-                "content_type": "general",
                 "cleaned_summary": message
             }
     
