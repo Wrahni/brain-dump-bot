@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Configuration from environment variables
-TELEGRAM_BOT_TOKEN = os.getenv('AAEV362fikxCdi4rtdipmdgyK2s6GZwDQdg')
-OPENROUTER_API_KEY = os.getenv('sk-ff07018359b257e227246715fef8c0b34d653d9dd02358082bfd31d616e3aea5')
-NOTION_API_KEY = os.getenv('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')
-NOTION_DATABASE_ID = os.getenv('226ade9c813a80faa3dbf0970a52b35e')
-AUTHORIZED_CHAT_ID = os.getenv('7857805142')  # Your Telegram chat ID
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+NOTION_API_KEY = os.getenv('NOTION_API_KEY')
+NOTION_DATABASE_ID = os.getenv('NOTION_DATABASE_ID')
+AUTHORIZED_CHAT_ID = os.getenv('AUTHORIZED_CHAT_ID')  # Your Telegram chat ID
 
 class BrainDumpProcessor:
     def __init__(self):
