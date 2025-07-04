@@ -185,19 +185,143 @@ class BrainDumpProcessor:
         
         data = {
             "parent": {
-                "database_id": NOTION_DATABASE_ID
+                "page_id": NOTION_DATABASE_ID  # Using as page ID now, not database ID
             },
-            "properties": properties
+            "properties": {
+                "title": [
+                    {
+                        "text": {
+                            "content": processed_data.get('cleaned_summary', original_message)[:100]
+                        }
+                    }
+                ]
+            },
+            "children": [
+                {
+                    "object": "block",
+                    "type": "heading_2",
+                    "heading_2": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": "Original Message"
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": original_message
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
         }
+        
+        # Add tasks if present
+        if processed_data.get('tasks'):
+            data["children"].extend([
+                {
+                    "object": "block",
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": "Tasks"
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "object": "block",
+                    "type": "bulleted_list_item",
+                    "bulleted_list_item": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": "\n".join(processed_data['tasks'])
+                                }
+                            }
+                        ]
+                    }
+                }
+            ])
+        
+        # Add ideas if present
+        if processed_data.get('ideas'):
+            data["children"].extend([
+                {
+                    "object": "block",
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": "Ideas"
+                                }
+                            }
+                        ]
+                    }
+                },
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            {
+                                "type": "text",
+                                "text": {
+                                    "content": "\n".join(processed_data['ideas'])
+                                }
+                            }
+                        ]
+                    }
+                }
+            ])
+        
+        # Add metadata
+        data["children"].append({
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": f"Priority: {processed_data.get('priority', 'Medium')} | Type: {processed_data.get('content_type', 'general')} | Created: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                        }
+                    }
+                ]
+            }
+        })
         
         try:
             response = requests.post(self.notion_url, headers=headers, json=data)
+            logger.info(f"Notion response status: {response.status_code}")
+            logger.info(f"Notion response headers: {response.headers}")
+            logger.info(f"Notion response body: {response.text}")
             response.raise_for_status()
             logger.info("Successfully added to Notion")
             return True
             
         except Exception as e:
             logger.error(f"Error adding to Notion: {e}")
+            logger.error(f"Request data was: {json.dumps(data, indent=2)}")
             return False
 
 # Initialize processor
@@ -264,6 +388,11 @@ def send_telegram_message(chat_id: str, text: str):
         requests.post(url, json=data)
     except Exception as e:
         logger.error(f"Error sending Telegram message: {e}")
+
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return jsonify({"message": "Brain Dump Bot is running!", "status": "ok"}), 200
 
 @app.route('/health', methods=['GET'])
 def health_check():
