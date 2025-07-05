@@ -212,10 +212,7 @@ class BrainDumpProcessor:
                     {
                         "type": "text",
                         "text": {
-                            "content": metadata,
-                            "annotations": {
-                                "italic": True
-                            }
+                            "content": metadata
                         }
                     }
                 ]
