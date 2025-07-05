@@ -1,5 +1,4 @@
 import os
-import anthropic
 from flask import Flask, request, jsonify
 import requests
 from notion_client import Client
@@ -10,9 +9,9 @@ app = Flask(__name__)
 
 # Initialize clients
 notion = Client(auth=os.environ.get("NOTION_API_KEY"))
-anthropic_client = anthropic.Anthropic(
-    api_key=os.environ.get("ANTHROPIC_API_KEY")
-)
+
+# Anthropic client will be initialized when needed
+anthropic_client = None
 
 # Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -30,6 +29,14 @@ NOTION_PAGES = {
 def analyze_with_claude(text):
     """Use Claude to analyze and categorize the message"""
     try:
+        # Import and initialize anthropic client lazily
+        import anthropic
+        global anthropic_client
+        if anthropic_client is None:
+            anthropic_client = anthropic.Anthropic(
+                api_key=os.environ.get("ANTHROPIC_API_KEY")
+            )
+        
         # Create the message with Claude
         message = anthropic_client.messages.create(
             model="claude-3-haiku-20240307",  # Using Haiku for cost-effectiveness
