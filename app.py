@@ -77,6 +77,8 @@ class BrainDumpProcessor:
         
         try:
             response = requests.post(self.anthropic_url, headers=headers, json=data)
+            logger.info(f"Anthropic response status: {response.status_code}")
+            logger.info(f"Anthropic response: {response.text}")
             response.raise_for_status()
             
             result = response.json()
