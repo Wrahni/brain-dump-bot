@@ -14,7 +14,7 @@ app = Flask(__name__)
 
 # Configuration from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
 NOTION_API_KEY = os.getenv('NOTION_API_KEY')
 AUTHORIZED_CHAT_ID = os.getenv('AUTHORIZED_CHAT_ID')
 
@@ -30,7 +30,7 @@ NOTION_PAGES = {
 
 class BrainDumpProcessor:
     def __init__(self):
-        self.openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.anthropic_url = "https://api.anthropic.com/v1/messages"
         self.notion_url = "https://api.notion.com/v1/pages"
         
     def process_with_claude(self, message: str) -> Dict[str, Any]:
@@ -62,25 +62,25 @@ class BrainDumpProcessor:
         """
         
         headers = {
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json"
+            "x-api-key": ANTHROPIC_API_KEY,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
         }
         
         data = {
-            "model": "anthropic/claude-3-sonnet",
+            "model": "claude-3-sonnet-20240229",
+            "max_tokens": 1000,
             "messages": [
                 {"role": "user", "content": prompt}
-            ],
-            "max_tokens": 1000,
-            "temperature": 0.3
+            ]
         }
         
         try:
-            response = requests.post(self.openrouter_url, headers=headers, json=data)
+            response = requests.post(self.anthropic_url, headers=headers, json=data)
             response.raise_for_status()
             
             result = response.json()
-            claude_response = result['choices'][0]['message']['content']
+            claude_response = result['content'][0]['text']
             
             # Try to extract JSON from Claude's response
             try:
