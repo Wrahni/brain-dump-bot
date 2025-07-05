@@ -7,11 +7,8 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Initialize clients
+# Initialize Notion client
 notion = Client(auth=os.environ.get("NOTION_API_KEY"))
-
-# Anthropic client will be initialized when needed
-anthropic_client = None
 
 # Environment variables
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -26,11 +23,21 @@ NOTION_PAGES = {
     "personal": os.environ.get("NOTION_PERSONAL_PAGE")
 }
 
+# Try to import anthropic
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+    anthropic_client = None
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    print("Anthropic module not available, using basic categorization")
+
 def analyze_with_claude(text):
     """Use Claude to analyze and categorize the message"""
+    if not ANTHROPIC_AVAILABLE:
+        return basic_categorization(text)
+    
     try:
-        # Import and initialize anthropic client lazily
-        import anthropic
         global anthropic_client
         if anthropic_client is None:
             anthropic_client = anthropic.Anthropic(
@@ -39,7 +46,7 @@ def analyze_with_claude(text):
         
         # Create the message with Claude
         message = anthropic_client.messages.create(
-            model="claude-3-haiku-20240307",  # Using Haiku for cost-effectiveness
+            model="claude-3-haiku-20240307",
             max_tokens=1000,
             temperature=0.3,
             system="""You are a smart task categorizer. Analyze the user's message and:
@@ -74,7 +81,6 @@ def analyze_with_claude(text):
         response_text = message.content[0].text
         try:
             # Try to extract JSON from the response
-            # Claude might wrap it in markdown code blocks
             if "```json" in response_text:
                 json_start = response_text.find("```json") + 7
                 json_end = response_text.find("```", json_start)
@@ -86,51 +92,91 @@ def analyze_with_claude(text):
             
             return json.loads(response_text)
         except json.JSONDecodeError:
-            # If JSON parsing fails, return a fallback
-            return {
-                "items": [{
-                    "text": text,
-                    "category": "brain_dump"
-                }]
-            }
+            return basic_categorization(text)
             
     except Exception as e:
         print(f"Claude API error: {e}")
-        # Fallback to basic categorization
         return basic_categorization(text)
 
 def basic_categorization(text):
     """Fallback categorization without AI"""
     text_lower = text.lower()
+    items = []
     
-    # Simple keyword-based categorization
-    if any(word in text_lower for word in ["buy", "shopping", "store", "groceries"]):
-        category = "shopping"
-    elif any(word in text_lower for word in ["project", "work", "deadline", "meeting"]):
-        category = "projects"
-    elif any(word in text_lower for word in ["call", "mom", "dad", "family", "self", "personal"]):
-        category = "personal"
-    elif any(word in text_lower for word in ["todo", "task", "do", "finish", "complete"]):
-        category = "todo"
+    # Try to split by common separators
+    parts = []
+    if " and " in text_lower:
+        parts = text.split(" and ")
+    elif ", " in text:
+        parts = text.split(", ")
     else:
-        category = "brain_dump"
+        parts = [text]
     
-    return {
-        "items": [{
-            "text": text,
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+            
+        part_lower = part.lower()
+        
+        # Categorize based on keywords
+        if any(word in part_lower for word in ["buy", "shopping", "store", "groceries", "get", "pick up"]):
+            category = "shopping"
+        elif any(word in part_lower for word in ["project", "work", "deadline", "meeting", "report", "presentation"]):
+            category = "projects"
+        elif any(word in part_lower for word in ["call", "mom", "dad", "family", "self", "personal", "gym", "doctor", "exercise"]):
+            category = "personal"
+        elif any(word in part_lower for word in ["todo", "task", "do", "finish", "complete", "pay", "send", "email"]):
+            category = "todo"
+        else:
+            category = "brain_dump"
+        
+        items.append({
+            "text": part,
             "category": category
-        }]
-    }
+        })
+    
+    # If no items were split, just use the whole text
+    if not items:
+        items.append({
+            "text": text,
+            "category": "brain_dump"
+        })
+    
+    return {"items": items}
 
 def add_to_notion(text, category):
     """Add item to the appropriate Notion page"""
     page_id = NOTION_PAGES.get(category, NOTION_PAGES["brain_dump"])
     
     try:
+        # First, let's try with just the Name property
+        properties = {
+            "Name": {
+                "title": [
+                    {
+                        "text": {
+                            "content": text
+                        }
+                    }
+                ]
+            }
+        }
+        
+        # Try to create the page
         notion.pages.create(
             parent={"database_id": page_id},
-            properties={
-                "Name": {
+            properties=properties
+        )
+        return True
+        
+    except Exception as e:
+        print(f"Notion error: {e}")
+        # If it fails, try with a simpler structure
+        try:
+            # Some Notion databases might use "Title" instead of "Name"
+            properties = {
+                "Title": {
                     "title": [
                         {
                             "text": {
@@ -138,23 +184,24 @@ def add_to_notion(text, category):
                             }
                         }
                     ]
-                },
-                "Status": {
-                    "select": {
-                        "name": "Not started"
-                    }
-                },
-                "Created": {
-                    "date": {
-                        "start": datetime.now().isoformat()
-                    }
                 }
             }
-        )
-        return True
-    except Exception as e:
-        print(f"Notion error: {e}")
-        return False
+            notion.pages.create(
+                parent={"database_id": page_id},
+                properties=properties
+            )
+            return True
+        except:
+            # Last resort - try without any properties (some databases auto-create title)
+            try:
+                notion.pages.create(
+                    parent={"database_id": page_id},
+                    properties={}
+                )
+                return True
+            except Exception as e2:
+                print(f"Final Notion error: {e2}")
+                return False
 
 def send_telegram_message(chat_id, text):
     """Send a message back to Telegram"""
@@ -164,51 +211,82 @@ def send_telegram_message(chat_id, text):
         "text": text,
         "parse_mode": "Markdown"
     }
-    requests.post(url, json=data)
+    response = requests.post(url, json=data)
+    if not response.ok:
+        print(f"Telegram error: {response.text}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle incoming Telegram messages"""
-    data = request.json
-    
-    # Extract message details
-    if 'message' in data:
-        chat_id = data['message']['chat']['id']
-        text = data['message'].get('text', '')
+    try:
+        data = request.json
         
-        # Check authorization
-        if chat_id != AUTHORIZED_CHAT_ID:
-            send_telegram_message(chat_id, "⛔ Unauthorized. This bot is private.")
-            return jsonify({"status": "unauthorized"})
-        
-        if text:
-            # Analyze with Claude
-            analysis = analyze_with_claude(text)
+        # Extract message details
+        if 'message' in data:
+            chat_id = data['message']['chat']['id']
+            text = data['message'].get('text', '')
             
-            # Process each item
-            success_count = 0
-            responses = []
+            # Check authorization
+            if chat_id != AUTHORIZED_CHAT_ID:
+                send_telegram_message(chat_id, "⛔ Unauthorized. This bot is private.")
+                return jsonify({"status": "unauthorized"})
             
-            for item in analysis['items']:
-                if add_to_notion(item['text'], item['category']):
-                    success_count += 1
-                    category_name = item['category'].replace('_', ' ').title()
-                    responses.append(f"✅ Added to {category_name}: {item['text']}")
+            if text:
+                # Analyze message (will use Claude if available, otherwise basic)
+                if ANTHROPIC_AVAILABLE:
+                    analysis = analyze_with_claude(text)
                 else:
-                    responses.append(f"❌ Failed to add: {item['text']}")
-            
-            # Send response
-            response_text = "\n".join(responses)
-            if success_count == len(analysis['items']):
-                response_text += "\n\n🎉 All items processed successfully!"
-            
-            send_telegram_message(chat_id, response_text)
+                    analysis = basic_categorization(text)
+                
+                # Process each item
+                success_count = 0
+                responses = []
+                
+                for item in analysis['items']:
+                    if add_to_notion(item['text'], item['category']):
+                        success_count += 1
+                        category_name = item['category'].replace('_', ' ').title()
+                        emoji = {
+                            "todo": "📝",
+                            "shopping": "🛒",
+                            "projects": "💼",
+                            "personal": "👤",
+                            "brain_dump": "🧠"
+                        }.get(item['category'], "📌")
+                        responses.append(f"{emoji} {category_name}: {item['text']}")
+                    else:
+                        responses.append(f"❌ Failed: {item['text']}")
+                
+                # Send response
+                response_text = "\n".join(responses)
+                if success_count == len(analysis['items']):
+                    response_text += "\n\n✅ All items added successfully!"
+                elif success_count > 0:
+                    response_text += f"\n\n⚠️ Added {success_count}/{len(analysis['items'])} items"
+                
+                # Add mode indicator
+                if not ANTHROPIC_AVAILABLE:
+                    response_text += "\n\n_📊 Using basic categorization_"
+                
+                send_telegram_message(chat_id, response_text)
+    except Exception as e:
+        print(f"Webhook error: {e}")
     
     return jsonify({"status": "ok"})
 
 @app.route('/')
 def home():
-    return "Brain Dump Bot is running! 🧠"
+    mode = "with Claude AI 🤖" if ANTHROPIC_AVAILABLE else "in basic mode 📊"
+    return f"Brain Dump Bot is running {mode}!"
+
+@app.route('/health')
+def health():
+    return jsonify({
+        "status": "healthy",
+        "anthropic_available": ANTHROPIC_AVAILABLE,
+        "notion_configured": bool(os.environ.get("NOTION_API_KEY")),
+        "telegram_configured": bool(os.environ.get("TELEGRAM_BOT_TOKEN"))
+    })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
